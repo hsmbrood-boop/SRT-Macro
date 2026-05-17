@@ -1,7 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [
+    ('b1.png', '.'), ('b2.png', '.'), ('b3.png', '.'),
+    ('b4.png', '.'), ('b5.png', '.'),
+    ('s1.png', '.'), ('s2.png', '.'), ('s3.png', '.'),
+    ('s4.png', '.'), ('s5.png', '.'),
+    ('s1.mp3', '.'),
+]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('cv2')

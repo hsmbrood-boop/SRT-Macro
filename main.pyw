@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, font as tkfont
 from PIL import Image, ImageTk
 import glob, os, sys, threading, time, math
 import pyautogui
@@ -19,9 +19,11 @@ if sys.platform == "win32":
             pass
 
 if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
+    BASE_DIR = os.path.dirname(sys.executable)   # 캡처 이미지 저장 위치 (exe 옆)
+    _BUNDLE_DIR = sys._MEIPASS                   # 번들 내장 파일 위치 (_internal)
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    _BUNDLE_DIR = BASE_DIR
 
 # b1 = 열차 목록 '예매하기' 버튼
 # b2 = 예매 진행 버튼
@@ -45,11 +47,20 @@ _ANIM_PAD = 8
 WIN_W_MIN = 400
 
 
-def find_image_file(prefix):
-    for ext in ("png", "jpg", "jpeg", "bmp"):
-        p = os.path.join(BASE_DIR, f"{prefix}.{ext}")
+def find_file(filename):
+    """exe 옆 폴더 우선, 없으면 번들 내장(_internal) 탐색"""
+    for search_dir in (BASE_DIR, _BUNDLE_DIR):
+        p = os.path.join(search_dir, filename)
         if os.path.exists(p):
             return p
+    return None
+
+def find_image_file(prefix):
+    for search_dir in (BASE_DIR, _BUNDLE_DIR):
+        for ext in ("png", "jpg", "jpeg", "bmp"):
+            p = os.path.join(search_dir, f"{prefix}.{ext}")
+            if os.path.exists(p):
+                return p
     return None
 
 
@@ -305,8 +316,12 @@ class SRTMacroApp:
 
         self._log("SRT 매크로 준비 완료.  b1~b5 이미지를 캡처 후 시작하세요.")
 
-        # 하단 크레딧 (빨간 둥근 테두리)
-        cv_w, cv_h, r = 300, 38, 10
+        # 하단 크레딧 (빨간 둥근 테두리) — 텍스트 실측 크기에 맞게 동적 조절
+        credit_text = "Developed by HSM of Orc Holdings."
+        credit_font = tkfont.Font(family="Malgun Gothic", size=10, weight="bold")
+        pad_x, pad_y, r = 20, 10, 10
+        cv_w = credit_font.measure(credit_text) + pad_x * 2
+        cv_h = credit_font.metrics("linespace") + pad_y * 2
         ooo_frame = tk.Frame(cf, bg=SRT_DARK)
         ooo_frame.pack(pady=(4, 16))
         ooo_cv = tk.Canvas(ooo_frame, width=cv_w, height=cv_h,
@@ -315,8 +330,8 @@ class SRTMacroApp:
         self._draw_rounded_rect_outline(ooo_cv, 2, 2, cv_w-3, cv_h-3,
                                         r, outline=SRT_RED, width=3)
         ooo_cv.create_text(cv_w // 2, cv_h // 2,
-                           text="Developed by HSM of Orc Holdings.",
-                           fill="white", font=("Malgun Gothic", 10, "bold"))
+                           text=credit_text,
+                           fill="white", font=credit_font)
 
     # ── 테두리 코멧 애니메이션 ─────────────────────────────────
     def _start_border_anim(self):
@@ -494,8 +509,8 @@ class SRTMacroApp:
 
     # ── 사운드 ─────────────────────────────────────────────────
     def _play_sound_loop(self):
-        s1 = os.path.join(BASE_DIR, "s1.mp3")
-        if not os.path.exists(s1):
+        s1 = find_file("s1.mp3")
+        if not s1:
             self._set_status("s1.mp3 없음! 소리 없이 대기합니다.", SRT_GOLD)
             return
         pygame.mixer.music.load(s1)
