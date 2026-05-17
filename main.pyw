@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
-import glob, os, sys, threading, time
+import glob, os, sys, threading, time, math
 import pyautogui
 import cv2
 import numpy as np
@@ -30,6 +30,7 @@ SRT_GOLD  = "#ffd700"
 SRT_GRAY  = "#8892b0"
 
 PREV_W, PREV_H = 88, 62
+_ANIM_PAD = 8
 
 
 def find_image_file(prefix):
@@ -101,10 +102,15 @@ class SRTMacroApp:
         self._region         = None
         self._preview_canvas = {}
         self._preview_photo  = {}
+        self._anim_active    = False
+        self._anim_id        = None
+        self._anim_pos       = 0.0
 
         self._build_ui()
         self.root.update_idletasks()
-        h = self.root.winfo_reqheight()
+        self._btn_canvas.configure(
+            height=self._start_btn.winfo_reqheight() + 2 * _ANIM_PAD)
+        h = self.root.winfo_reqheight() + 20
         self.root.geometry(f"420x{h}+0+0")
         self.root.bind("<F12>", lambda e: self.stop_macro())
 
@@ -145,14 +151,28 @@ class SRTMacroApp:
 
         tk.Frame(self.root, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=2)
 
-        # 매크로 시작 버튼
+        # 매크로 시작 버튼 (코멧 테두리 애니메이션)
         bf = tk.Frame(self.root, bg=SRT_DARK, padx=16, pady=6)
         bf.pack(fill="x")
-        tk.Button(bf, text="🚄  SRT 좌석 매크로 시작",
+
+        self._btn_canvas = tk.Canvas(bf, bg=SRT_DARK,
+                                     height=60, highlightthickness=0)
+        self._btn_canvas.pack(fill="x")
+
+        self._start_btn = tk.Button(self._btn_canvas,
+                  text="🚄  SRT 좌석 매크로 시작",
                   font=("Malgun Gothic", 12, "bold"),
                   bg=SRT_BTN, fg="white", activebackground="#533483",
                   relief="flat", cursor="hand2", height=2,
-                  command=self.start_seat_macro).pack(fill="x")
+                  command=self.start_seat_macro)
+
+        self._btn_win = self._btn_canvas.create_window(
+            _ANIM_PAD, _ANIM_PAD, anchor="nw", window=self._start_btn)
+
+        def _resize_btn(event):
+            self._btn_canvas.itemconfig(
+                self._btn_win, width=max(1, event.width - 2 * _ANIM_PAD))
+        self._btn_canvas.bind("<Configure>", _resize_btn)
 
         tk.Frame(self.root, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=4)
 
@@ -224,19 +244,13 @@ class SRTMacroApp:
                                 relief="flat", state="disabled", wrap="word")
         self.log_text.pack(fill="both", expand=True)
 
-        # 프로그램 종료
-        tk.Button(self.root, text="✖  프로그램 종료",
-                  font=("Malgun Gothic", 9),
-                  bg="#222244", fg=SRT_GRAY,
-                  relief="flat", cursor="hand2",
-                  command=self.quit_app).pack(fill="x", padx=16, pady=(0, 8))
 
         self._log("SRT 매크로 준비 완료.  b1~b5 이미지를 캡처 후 시작하세요.")
 
         # 하단 크레딧 (빨간 둥근 테두리)
-        cv_w, cv_h, r = 300, 34, 10
+        cv_w, cv_h, r = 300, 38, 10
         ooo_frame = tk.Frame(self.root, bg=SRT_DARK)
-        ooo_frame.pack(pady=(4, 8))
+        ooo_frame.pack(pady=(4, 16))
         ooo_cv = tk.Canvas(ooo_frame, width=cv_w, height=cv_h,
                            bg=SRT_DARK, highlightthickness=0)
         ooo_cv.pack()
@@ -245,6 +259,68 @@ class SRTMacroApp:
         ooo_cv.create_text(cv_w // 2, cv_h // 2,
                            text="Developed by HSM of Orc Holdings.",
                            fill="white", font=("Malgun Gothic", 10, "bold"))
+
+    # ── 테두리 코멧 애니메이션 ─────────────────────────────────
+    def _start_border_anim(self):
+        if self._anim_active:
+            return
+        self._anim_active = True
+        self._anim_pos    = 0.0
+        self._do_anim()
+
+    def _stop_border_anim(self):
+        self._anim_active = False
+        if self._anim_id:
+            self.root.after_cancel(self._anim_id)
+            self._anim_id = None
+        self._btn_canvas.delete("anim")
+
+    def _perim_to_xy(self, t, x1, y1, x2, y2, pw, ph, perim):
+        t = t % perim
+        if t <= pw:
+            return (x1 + t, y1)
+        t -= pw
+        if t <= ph:
+            return (x2, y1 + t)
+        t -= ph
+        if t <= pw:
+            return (x2 - t, y2)
+        t -= ph
+        return (x1, y2 - min(t, ph))
+
+    def _do_anim(self):
+        if not self._anim_active:
+            return
+        c = self._btn_canvas
+        w, h = c.winfo_width(), c.winfo_height()
+        if w < 10 or h < 10:
+            self._anim_id = self.root.after(16, self._do_anim)
+            return
+
+        c.delete("anim")
+        p = _ANIM_PAD - 2
+        x1, y1, x2, y2 = p, p, w - p, h - p
+
+        # 사인파 밝기 0.0 ~ 1.0
+        bright = (math.sin(self._anim_pos) + 1) / 2
+
+        # SRT_RED 계열 4겹 글로우 — 전체 테두리 동시 반짝임
+        c.create_rectangle(x1, y1, x2, y2,
+                           outline=f"#{int(90*bright):02x}00{int(12*bright):02x}",
+                           width=7, tags="anim")
+        c.create_rectangle(x1, y1, x2, y2,
+                           outline=f"#{int(170*bright):02x}00{int(25*bright):02x}",
+                           width=5, tags="anim")
+        c.create_rectangle(x1, y1, x2, y2,
+                           outline=f"#{int(220*bright):02x}00{int(45*bright):02x}",
+                           width=3, tags="anim")
+        peak = max(0.0, bright - 0.5) * 2          # 밝기 상위 50% 구간만 켜지는 흰빛 코어
+        c.create_rectangle(x1, y1, x2, y2,
+                           outline=f"#ff{int(80*peak):02x}{int(40*peak):02x}",
+                           width=1, tags="anim")
+
+        self._anim_pos = (self._anim_pos + 0.15) % (2 * math.pi)
+        self._anim_id  = self.root.after(16, self._do_anim)
 
     # ── 미리보기 (썸네일) ───────────────────────────────────────
     def _draw_preview(self, prefix):
@@ -372,6 +448,7 @@ class SRTMacroApp:
     def stop_macro(self):
         self._macro_running = False
         self._stop_sound()
+        self._stop_border_anim()
         self._set_status("매크로 종료됨.", SRT_GOLD)
 
     # ── 이미지 매칭 ─────────────────────────────────────────────
@@ -427,6 +504,7 @@ class SRTMacroApp:
             self._search_thread = threading.Thread(
                 target=self._seat_loop, daemon=True)
             self._search_thread.start()
+            self._start_border_anim()
         else:
             self._log("범위 지정 취소됨.")
 
@@ -446,6 +524,7 @@ class SRTMacroApp:
 
     # ── 성공 처리 ───────────────────────────────────────────────
     def _on_success(self):
+        self.root.after(0, self._stop_border_anim)
         self._set_status("예매 성공! 알림음 5분 재생 중...", SRT_GREEN)
         self._play_sound_loop()
         deadline = time.time() + 300
@@ -472,12 +551,12 @@ class SRTMacroApp:
 
     # ────────────────────────────────────────────────────────────
     # SRT 매크로 알고리즘
-    #   ① b2 탐색(전체화면) → 클릭(브라우저 포커스) + Ctrl+Home
-    #   ② b1 탐색(전체화면) → 클릭  /  없으면 Ctrl+Home 후 재탐색
-    #   ③ b2 탐색(전체화면) → 클릭  /  없으면 ①부터 재시작
-    #   ④ b3 탐색(지정범위) → 클릭  /  없으면 ①부터 재시작
+    #   ① b2 탐색(전체화면) → 클릭(브라우저 포커스) + Ctrl+Home  ← 최초 1회
+    #   ② b1 탐색(전체화면) → 발견할 때까지 대기 후 클릭
+    #   ③ b2 탐색(전체화면) → 클릭  /  없으면 Ctrl+Home → ②부터 재시작
+    #   ④ b3 탐색(지정범위) → 클릭  /  없으면 Ctrl+Home → ②부터 재시작
     #   ⑤ b5 탐색(전체화면) → 발견 시 클릭  /  없으면 ⑥으로 바로 이동
-    #   ⑥ b4 탐색(전체화면) → 성공  /  없으면 ①부터 재시작
+    #   ⑥ b4 탐색(전체화면) → 성공  /  없으면 Ctrl+Home → ②부터 재시작
     # ────────────────────────────────────────────────────────────
     def _seat_loop(self):
         t1 = self._load("b1")
@@ -490,30 +569,39 @@ class SRTMacroApp:
 
         region = self._region
 
+        # ① b2 발견할 때까지 대기 → 클릭(브라우저 포커스) + Ctrl+Home  [최초 1회]
         while self._macro_running:
-
-            # ① b2 탐색 → 클릭(브라우저 포커스) + Ctrl+Home
-            self._set_status("브라우저 포커스: b2 탐색 중...")
+            self._set_status("브라우저 포커스: b2 탐색 중... (발견 시 시작)")
             pos = self._match(t2)
             if pos:
                 self._set_status("b2 발견 → 클릭 (브라우저 포커스 획득)")
                 pyautogui.click(pos[0], pos[1])
                 time.sleep(0.3)
-            self._set_status("맨위 스크롤...")
-            pyautogui.hotkey("ctrl", "Home")
-            time.sleep(0.5)
+                break
+            time.sleep(0.3)
 
-            # ② b1 탐색 (전체화면)
+        if not self._macro_running:
+            self._stop_sound()
+            self._set_status("대기 중")
+            return
+
+        self._set_status("맨위 스크롤...")
+        pyautogui.hotkey("ctrl", "Home")
+        time.sleep(0.5)
+
+        # ②~⑥ 반복 루프 (재시작 시 ②부터)
+        while self._macro_running:
+
+            # ② b1 발견할 때까지 대기 → 클릭
             while self._macro_running:
-                self._set_status("b1 이미지 탐색 중...")
+                self._set_status("b1 이미지 탐색 중... (발견 시 클릭)")
                 pos = self._match(t1)
                 if pos:
                     self._set_status("b1 이미지 발견 → 클릭!")
                     pyautogui.click(pos[0], pos[1])
                     time.sleep(0.8)
                     break
-                self._set_status("b1 이미지 없음 → 맨위 스크롤 후 재탐색")
-                self._scroll_top()
+                time.sleep(0.3)
 
             if not self._macro_running:
                 break
@@ -522,7 +610,7 @@ class SRTMacroApp:
             self._set_status("b2 이미지 탐색 중...")
             pos = self._match(t2)
             if not pos:
-                self._set_status("b2 이미지 없음 → 맨위로 재시작")
+                self._set_status("b2 이미지 없음 → Ctrl+Home 후 ②부터 재시작")
                 self._scroll_top()
                 continue
             self._set_status("b2 이미지 발견 → 클릭!")
@@ -533,7 +621,7 @@ class SRTMacroApp:
             self._set_status("b3 이미지 탐색 중... (지정 범위)")
             pos = self._match(t3, region)
             if not pos:
-                self._set_status("b3 이미지 없음 → 맨위로 재시작")
+                self._set_status("b3 이미지 없음 → Ctrl+Home 후 ②부터 재시작")
                 self._scroll_top()
                 continue
             self._set_status("b3 이미지 발견 → 클릭!")
@@ -564,7 +652,7 @@ class SRTMacroApp:
                 self._on_success()
                 return
 
-            self._set_status("b4 이미지 없음 → 맨위로 재시작")
+            self._set_status("b4 이미지 없음 → Ctrl+Home 후 ②부터 재시작")
             self._scroll_top()
 
         self._stop_sound()
