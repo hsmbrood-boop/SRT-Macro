@@ -7,6 +7,17 @@ import cv2
 import numpy as np
 import pygame
 
+# Windows DPI 인식 설정 (Tk 창 생성 전에 호출해야 함)
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
@@ -31,6 +42,7 @@ SRT_GRAY  = "#8892b0"
 
 PREV_W, PREV_H = 88, 62
 _ANIM_PAD = 8
+WIN_W = 420
 
 
 def find_image_file(prefix):
@@ -92,10 +104,10 @@ class SRTMacroApp:
     def __init__(self, root):
         self.root = root
         self.root.title("SRT 자동 예매 매크로")
-        self.root.geometry("420x960+0+0")
-        self.root.resizable(False, False)
+        self.root.resizable(False, True)
         self.root.configure(bg=SRT_DARK)
         self.root.attributes("-topmost", True)
+        self.root.minsize(WIN_W, 400)
 
         self._macro_running  = False
         self._search_thread  = None
@@ -110,11 +122,17 @@ class SRTMacroApp:
         self.root.update_idletasks()
         self._btn_canvas.configure(
             height=self._start_btn.winfo_reqheight() + 2 * _ANIM_PAD)
-        h = self.root.winfo_reqheight() + 20
-        self.root.geometry(f"420x{h}+0+0")
-        self.root.bind("<F12>", lambda e: self.stop_macro())
 
-        # 시작 시 안내 팝업
+        # 화면 크기에 맞게 창 크기·위치 동적 설정
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        self.root.update_idletasks()
+        content_h = self._content_frame.winfo_reqheight() + 20
+        win_h = min(content_h, sh - 80)
+        self.root.geometry(f"{WIN_W}x{win_h}+0+0")
+        self._update_scrollregion()
+
+        self.root.bind("<F12>", lambda e: self.stop_macro())
         self.root.after(200, self._startup_notice)
 
     def _startup_notice(self):
@@ -126,10 +144,44 @@ class SRTMacroApp:
             "→ 차종구분: SRT 선택 후 이용하세요."
         )
 
+    # ── 스크롤 영역 업데이트 ────────────────────────────────────
+    def _update_scrollregion(self):
+        self.root.update_idletasks()
+        self._main_canvas.configure(scrollregion=self._main_canvas.bbox("all"))
+
+    def _on_mousewheel(self, event):
+        self._main_canvas.yview_scroll(-1 * (event.delta // 120), "units")
+
     # ── UI 빌드 ─────────────────────────────────────────────────
     def _build_ui(self):
+        # 스크롤 가능한 메인 컨테이너
+        self._main_canvas = tk.Canvas(self.root, bg=SRT_DARK, highlightthickness=0)
+        scrollbar = tk.Scrollbar(self.root, orient="vertical",
+                                 command=self._main_canvas.yview)
+        self._main_canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        self._main_canvas.pack(side="left", fill="both", expand=True)
+
+        self._content_frame = tk.Frame(self._main_canvas, bg=SRT_DARK)
+        self._frame_id = self._main_canvas.create_window(
+            (0, 0), window=self._content_frame, anchor="nw")
+
+        # 콘텐츠 크기 변경 시 스크롤 영역 갱신
+        self._content_frame.bind("<Configure>", lambda e: self._update_scrollregion())
+        # 캔버스 너비 변경 시 내부 프레임 너비 동기화
+        self._main_canvas.bind(
+            "<Configure>",
+            lambda e: self._main_canvas.itemconfig(self._frame_id, width=e.width))
+
+        # 마우스 휠 스크롤
+        self._main_canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self._content_frame.bind("<MouseWheel>", self._on_mousewheel)
+
+        cf = self._content_frame  # 위젯 부모 단축명
+
         # 헤더
-        header = tk.Frame(self.root, bg=SRT_NAV, pady=12)
+        header = tk.Frame(cf, bg=SRT_NAV, pady=12)
         header.pack(fill="x")
         tk.Label(header, text="SRT 자동 예매 매크로",
                  font=("Malgun Gothic", 15, "bold"),
@@ -139,7 +191,7 @@ class SRTMacroApp:
                  bg=SRT_NAV, fg=SRT_GRAY).pack()
 
         # 상태 표시
-        sf = tk.Frame(self.root, bg=SRT_DARK, padx=16, pady=5)
+        sf = tk.Frame(cf, bg=SRT_DARK, padx=16, pady=5)
         sf.pack(fill="x")
         tk.Label(sf, text="상태:", font=("Malgun Gothic", 9),
                  bg=SRT_DARK, fg=SRT_GRAY).pack(side="left")
@@ -149,10 +201,10 @@ class SRTMacroApp:
                                      bg=SRT_DARK, fg=SRT_GREEN)
         self.status_label.pack(side="left", padx=4)
 
-        tk.Frame(self.root, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=2)
+        tk.Frame(cf, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=2)
 
         # 매크로 시작 버튼 (코멧 테두리 애니메이션)
-        bf = tk.Frame(self.root, bg=SRT_DARK, padx=16, pady=6)
+        bf = tk.Frame(cf, bg=SRT_DARK, padx=16, pady=6)
         bf.pack(fill="x")
 
         self._btn_canvas = tk.Canvas(bf, bg=SRT_DARK,
@@ -174,10 +226,10 @@ class SRTMacroApp:
                 self._btn_win, width=max(1, event.width - 2 * _ANIM_PAD))
         self._btn_canvas.bind("<Configure>", _resize_btn)
 
-        tk.Frame(self.root, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=4)
+        tk.Frame(cf, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=4)
 
         # ── 이미지 캡처 + 미리보기 (b1~b4, 2×2 그리드) ──────────
-        sec = tk.Frame(self.root, bg=SRT_DARK, padx=16, pady=4)
+        sec = tk.Frame(cf, bg=SRT_DARK, padx=16, pady=4)
         sec.pack(fill="x")
         tk.Label(sec,
                  text="이미지 지정  (미리보기 클릭 → 크게 보기 / 버튼 클릭 → 캡처)",
@@ -201,12 +253,12 @@ class SRTMacroApp:
             cell.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
 
             # 미리보기 캔버스 (클릭 → 크게 보기)
-            cv = tk.Canvas(cell, width=PREV_W, height=PREV_H,
+            pv = tk.Canvas(cell, width=PREV_W, height=PREV_H,
                            bg="#0d0d1a", highlightthickness=1,
                            highlightbackground=SRT_GRAY, cursor="hand2")
-            cv.pack()
-            cv.bind("<Button-1>", lambda e, p=prefix: self._show_large_preview(p))
-            self._preview_canvas[prefix] = cv
+            pv.pack()
+            pv.bind("<Button-1>", lambda e, pr=prefix: self._show_large_preview(pr))
+            self._preview_canvas[prefix] = pv
             self._draw_preview(prefix)
 
             # 캡처 버튼
@@ -214,16 +266,16 @@ class SRTMacroApp:
                       font=("Malgun Gothic", 8, "bold"),
                       bg="#0d2233", fg=SRT_GREEN,
                       relief="flat", cursor="hand2", height=2,
-                      command=lambda p=prefix: self._capture_image(p)
+                      command=lambda pr=prefix: self._capture_image(pr)
                       ).pack(fill="x", pady=(3, 0))
 
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
 
-        tk.Frame(self.root, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=6)
+        tk.Frame(cf, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=6)
 
         # 매크로 종료 버튼
-        sf2 = tk.Frame(self.root, bg=SRT_DARK, padx=16)
+        sf2 = tk.Frame(cf, bg=SRT_DARK, padx=16)
         sf2.pack(fill="x")
         tk.Button(sf2, text="⏹  매크로 종료  (F12)",
                   font=("Malgun Gothic", 13, "bold"),
@@ -231,10 +283,10 @@ class SRTMacroApp:
                   relief="flat", cursor="hand2", height=2,
                   command=self.stop_macro).pack(fill="x")
 
-        tk.Frame(self.root, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=6)
+        tk.Frame(cf, height=1, bg=SRT_GRAY).pack(fill="x", padx=16, pady=6)
 
         # 로그 영역 (10줄)
-        lf = tk.Frame(self.root, bg=SRT_NAV, padx=8, pady=6)
+        lf = tk.Frame(cf, bg=SRT_NAV, padx=8, pady=6)
         lf.pack(fill="x", padx=16, pady=(0, 4))
         tk.Label(lf, text="로그", font=("Malgun Gothic", 8),
                  bg=SRT_NAV, fg=SRT_GRAY).pack(anchor="w")
@@ -244,12 +296,11 @@ class SRTMacroApp:
                                 relief="flat", state="disabled", wrap="word")
         self.log_text.pack(fill="both", expand=True)
 
-
         self._log("SRT 매크로 준비 완료.  b1~b5 이미지를 캡처 후 시작하세요.")
 
         # 하단 크레딧 (빨간 둥근 테두리)
         cv_w, cv_h, r = 300, 38, 10
-        ooo_frame = tk.Frame(self.root, bg=SRT_DARK)
+        ooo_frame = tk.Frame(cf, bg=SRT_DARK)
         ooo_frame.pack(pady=(4, 16))
         ooo_cv = tk.Canvas(ooo_frame, width=cv_w, height=cv_h,
                            bg=SRT_DARK, highlightthickness=0)
@@ -366,7 +417,12 @@ class SRTMacroApp:
         win.title(win_title)
         win.attributes("-topmost", True)
         win.resizable(True, True)
-        iw, ih = max(orig.width, 200), max(orig.height, 150)
+
+        # 이미지가 화면보다 크면 화면 80% 이내로 제한
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        iw = min(max(orig.width, 200), int(sw * 0.8))
+        ih = min(max(orig.height, 150), int(sh * 0.8))
         win.geometry(f"{iw}x{ih}")
 
         canvas = tk.Canvas(win, bg="black", highlightthickness=0)
