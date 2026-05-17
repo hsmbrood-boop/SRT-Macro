@@ -91,7 +91,7 @@ class SRTMacroApp:
     def __init__(self, root):
         self.root = root
         self.root.title("SRT 자동 예매 매크로")
-        self.root.geometry("420x820")
+        self.root.geometry("420x960+0+0")
         self.root.resizable(False, False)
         self.root.configure(bg=SRT_DARK)
         self.root.attributes("-topmost", True)
@@ -103,6 +103,9 @@ class SRTMacroApp:
         self._preview_photo  = {}
 
         self._build_ui()
+        self.root.update_idletasks()
+        h = self.root.winfo_reqheight()
+        self.root.geometry(f"420x{h}+0+0")
         self.root.bind("<F12>", lambda e: self.stop_macro())
 
         # 시작 시 안내 팝업
@@ -212,10 +215,10 @@ class SRTMacroApp:
 
         # 로그 영역 (10줄)
         lf = tk.Frame(self.root, bg=SRT_NAV, padx=8, pady=6)
-        lf.pack(fill="both", expand=True, padx=16, pady=(0, 4))
+        lf.pack(fill="x", padx=16, pady=(0, 4))
         tk.Label(lf, text="로그", font=("Malgun Gothic", 8),
                  bg=SRT_NAV, fg=SRT_GRAY).pack(anchor="w")
-        self.log_text = tk.Text(lf, height=10,
+        self.log_text = tk.Text(lf, height=8,
                                 bg="#0d0d1a", fg=SRT_GREEN,
                                 font=("Consolas", 10),
                                 relief="flat", state="disabled", wrap="word")
@@ -228,7 +231,20 @@ class SRTMacroApp:
                   relief="flat", cursor="hand2",
                   command=self.quit_app).pack(fill="x", padx=16, pady=(0, 8))
 
-        self._log("SRT 매크로 준비 완료.  b1~b4 이미지를 캡처 후 시작하세요.")
+        self._log("SRT 매크로 준비 완료.  b1~b5 이미지를 캡처 후 시작하세요.")
+
+        # 하단 크레딧 (빨간 둥근 테두리)
+        cv_w, cv_h, r = 300, 34, 10
+        ooo_frame = tk.Frame(self.root, bg=SRT_DARK)
+        ooo_frame.pack(pady=(4, 8))
+        ooo_cv = tk.Canvas(ooo_frame, width=cv_w, height=cv_h,
+                           bg=SRT_DARK, highlightthickness=0)
+        ooo_cv.pack()
+        self._draw_rounded_rect_outline(ooo_cv, 2, 2, cv_w-3, cv_h-3,
+                                        r, outline=SRT_RED, width=3)
+        ooo_cv.create_text(cv_w // 2, cv_h // 2,
+                           text="Developed by HSM of Orc Holdings.",
+                           fill="white", font=("Malgun Gothic", 10, "bold"))
 
     # ── 미리보기 (썸네일) ───────────────────────────────────────
     def _draw_preview(self, prefix):
@@ -421,7 +437,12 @@ class SRTMacroApp:
             self._set_status(f"{prefix} 파일 없음!", SRT_RED)
             self._macro_running = False
             return None
-        return cv2.imread(p, cv2.IMREAD_COLOR)
+        # cv2.imread는 한글 경로를 못 읽으므로 imdecode 사용
+        img = cv2.imdecode(np.fromfile(p, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            self._set_status(f"{prefix} 로드 실패! (경로 오류)", SRT_RED)
+            self._macro_running = False
+        return img
 
     # ── 성공 처리 ───────────────────────────────────────────────
     def _on_success(self):
@@ -434,15 +455,16 @@ class SRTMacroApp:
         self._macro_running = False
         self._set_status("알림음 종료.", SRT_GOLD)
 
-    # ── 브라우저 포커스 + 맨위 스크롤 ──────────────────────────
-    def _focus_and_scroll_top(self):
-        sw = pyautogui.size().width
-        pyautogui.moveTo(sw // 2, 30, duration=0.15)
-        time.sleep(0.1)
-        pyautogui.click()
-        time.sleep(0.3)
-        pyautogui.hotkey("ctrl", "Home")
-        time.sleep(0.5)
+    # ── 둥근 테두리 그리기 ──────────────────────────────────────
+    def _draw_rounded_rect_outline(self, canvas, x1, y1, x2, y2, r, outline, width):
+        canvas.create_line(x1+r, y1, x2-r, y1, fill=outline, width=width)
+        canvas.create_line(x1+r, y2, x2-r, y2, fill=outline, width=width)
+        canvas.create_line(x1, y1+r, x1, y2-r, fill=outline, width=width)
+        canvas.create_line(x2, y1+r, x2, y2-r, fill=outline, width=width)
+        canvas.create_arc(x1, y1, x1+2*r, y1+2*r, start=90,  extent=90,  style="arc", outline=outline, width=width)
+        canvas.create_arc(x2-2*r, y1, x2, y1+2*r, start=0,   extent=90,  style="arc", outline=outline, width=width)
+        canvas.create_arc(x1, y2-2*r, x1+2*r, y2, start=180, extent=90,  style="arc", outline=outline, width=width)
+        canvas.create_arc(x2-2*r, y2-2*r, x2, y2, start=270, extent=90,  style="arc", outline=outline, width=width)
 
     def _scroll_top(self):
         pyautogui.hotkey("ctrl", "Home")
@@ -450,7 +472,7 @@ class SRTMacroApp:
 
     # ────────────────────────────────────────────────────────────
     # SRT 매크로 알고리즘
-    #   ① 브라우저 포커스 + Ctrl+Home
+    #   ① b2 탐색(전체화면) → 클릭(브라우저 포커스) + Ctrl+Home
     #   ② b1 탐색(전체화면) → 클릭  /  없으면 Ctrl+Home 후 재탐색
     #   ③ b2 탐색(전체화면) → 클릭  /  없으면 ①부터 재시작
     #   ④ b3 탐색(지정범위) → 클릭  /  없으면 ①부터 재시작
@@ -470,9 +492,16 @@ class SRTMacroApp:
 
         while self._macro_running:
 
-            # ① 브라우저 포커스 + 맨위 스크롤
-            self._set_status("브라우저 포커스 + 맨위 스크롤...")
-            self._focus_and_scroll_top()
+            # ① b2 탐색 → 클릭(브라우저 포커스) + Ctrl+Home
+            self._set_status("브라우저 포커스: b2 탐색 중...")
+            pos = self._match(t2)
+            if pos:
+                self._set_status("b2 발견 → 클릭 (브라우저 포커스 획득)")
+                pyautogui.click(pos[0], pos[1])
+                time.sleep(0.3)
+            self._set_status("맨위 스크롤...")
+            pyautogui.hotkey("ctrl", "Home")
+            time.sleep(0.5)
 
             # ② b1 탐색 (전체화면)
             while self._macro_running:
@@ -521,10 +550,17 @@ class SRTMacroApp:
             else:
                 self._set_status("b5 이미지 없음 → b4 탐색으로 이동")
 
-            # ⑥ b4 탐색 (전체화면) → 발견 시 성공
-            self._set_status("b4 이미지 탐색 중...")
-            pos = self._match(t4)
-            if pos:
+            # ⑥ b4 탐색 (전체화면, 최대 7초 반복)
+            deadline = time.time() + 7
+            found_b4 = False
+            while self._macro_running and time.time() < deadline:
+                self._set_status("b4 이미지 탐색 중... (최대 7초)")
+                pos = self._match(t4)
+                if pos:
+                    found_b4 = True
+                    break
+                time.sleep(0.3)
+            if found_b4:
                 self._on_success()
                 return
 
