@@ -42,7 +42,7 @@ SRT_GRAY  = "#8892b0"
 
 PREV_W, PREV_H = 88, 62
 _ANIM_PAD = 8
-WIN_W = 420
+WIN_W_MIN = 400
 
 
 def find_image_file(prefix):
@@ -107,7 +107,6 @@ class SRTMacroApp:
         self.root.resizable(False, True)
         self.root.configure(bg=SRT_DARK)
         self.root.attributes("-topmost", True)
-        self.root.minsize(WIN_W, 400)
 
         self._macro_running  = False
         self._search_thread  = None
@@ -118,18 +117,26 @@ class SRTMacroApp:
         self._anim_id        = None
         self._anim_pos       = 0.0
 
+        # 임시로 넓게 펼쳐서 위젯 자연 크기 측정
+        self.root.geometry("1200x800")
         self._build_ui()
         self.root.update_idletasks()
         self._btn_canvas.configure(
             height=self._start_btn.winfo_reqheight() + 2 * _ANIM_PAD)
+        self.root.update_idletasks()
 
-        # 화면 크기에 맞게 창 크기·위치 동적 설정
+        # 콘텐츠 실제 필요 너비 측정 → 창 너비 결정
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        self.root.update_idletasks()
+        req_w = self._content_frame.winfo_reqwidth()
+        win_w = max(req_w + 20, WIN_W_MIN)  # 스크롤바 여유 + 최소값 보장
+        win_w = min(win_w, sw)              # 화면 너비 초과 방지
+
         content_h = self._content_frame.winfo_reqheight() + 20
         win_h = min(content_h, sh - 80)
-        self.root.geometry(f"{WIN_W}x{win_h}+0+0")
+
+        self.root.minsize(win_w, 400)
+        self.root.geometry(f"{win_w}x{win_h}+0+0")
         self._update_scrollregion()
 
         self.root.bind("<F12>", lambda e: self.stop_macro())
