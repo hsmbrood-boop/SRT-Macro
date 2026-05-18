@@ -17,6 +17,13 @@ if sys.platform == "win32":
             ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
             pass
+    # 콘솔(도스) 창이 붙어 있으면 숨김 (python.exe로 실행돼도 창 안 보이게)
+    try:
+        _con = ctypes.windll.kernel32.GetConsoleWindow()
+        if _con:
+            ctypes.windll.user32.ShowWindow(_con, 0)  # SW_HIDE
+    except Exception:
+        pass
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)   # 캡처 이미지 저장 위치 (exe 옆)
@@ -631,7 +638,7 @@ class SRTMacroApp:
     # SRT 매크로 알고리즘
     #   ① b2 탐색(전체화면) → 클릭(브라우저 포커스) + Ctrl+Home  ← 최초 1회
     #   ② b1 탐색(전체화면) → 발견할 때까지 대기 후 클릭
-    #   ③ b2 탐색(전체화면) → 클릭  /  없으면 Ctrl+Home → ②부터 재시작
+    #   ③ b2 탐색(전체화면) → 발견할 때까지 대기 후 클릭
     #   ④ b3 탐색(지정범위) → 클릭  /  없으면 Ctrl+Home → ②부터 재시작
     #   ⑤ b5 탐색(전체화면) → 발견 시 클릭  /  없으면 ⑥으로 바로 이동
     #   ⑥ b4 탐색(전체화면) → 성공  /  없으면 Ctrl+Home → ②부터 재시작
@@ -677,20 +684,23 @@ class SRTMacroApp:
                 if pos:
                     self._set_status("b1 이미지 발견 → 클릭!")
                     pyautogui.click(pos[0], pos[1])
-                    time.sleep(0.8)
+                    time.sleep(0.3)
                     break
                 time.sleep(0.3)
 
             if not self._macro_running:
                 break
 
-            # ③ b2 탐색 (전체화면)
-            self._set_status("b2 이미지 탐색 중...")
-            pos = self._match(t2)
-            if not pos:
-                self._set_status("b2 이미지 없음 → Ctrl+Home 후 ②부터 재시작")
-                self._scroll_top()
-                continue
+            # ③ b2 탐색 (전체화면) — 발견할 때까지 대기
+            pos = None
+            while self._macro_running:
+                self._set_status("b2 이미지 탐색 중... (발견 시 클릭)")
+                pos = self._match(t2)
+                if pos:
+                    break
+                time.sleep(0.3)
+            if not self._macro_running:
+                break
             self._set_status("b2 이미지 발견 → 클릭!")
             pyautogui.click(pos[0], pos[1])
             time.sleep(0.5)
